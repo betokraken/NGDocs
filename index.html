@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Batch job schedule — dependency timeline</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #f7f6f3;
+    --surface:   #ffffff;
+    --surface2:  #f0efe9;
+    --border:    rgba(0,0,0,0.1);
+    --border-md: rgba(0,0,0,0.18);
+    --text:      #1a1a18;
+    --text-2:    #5a5a56;
+    --text-3:    #9a9a94;
+    --blue:      #185FA5;
+    --blue-bg:   #E6F1FB;
+    --purple:    #3C3489;
+    --purple-bg: #EEEDFE;
+    --teal:      #085041;
+    --teal-bg:   #E1F5EE;
+    --teal-bd:   #1D9E75;
+    --amber:     #633806;
+    --amber-bg:  #FAEEDA;
+    --amber-bd:  #EF9F27;
+    --info-text: #185FA5;
+    --radius:    8px;
+    --radius-lg: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #1a1a18;
+      --surface:   #242422;
+      --surface2:  #2e2e2b;
+      --border:    rgba(255,255,255,0.1);
+      --border-md: rgba(255,255,255,0.2);
+      --text:      #e8e7e0;
+      --text-2:    #9a9a94;
+      --text-3:    #5a5a56;
+      --blue:      #85B7EB;
+      --blue-bg:   #0c2a44;
+      --purple:    #AFA9EC;
+      --purple-bg: #1e1b40;
+      --teal:      #5DCAA5;
+      --teal-bg:   #052a1f;
+      --teal-bd:   #1D9E75;
+      --amber:     #FAC775;
+      --amber-bg:  #2d1e07;
+      --amber-bd:  #BA7517;
+      --info-text: #85B7EB;
+    }
+  }
+
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 20px 48px;
+  }
+
+  .page-header {
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+  }
+
+  .page-header h1 {
+    font-family: 'Georgia', serif;
+    font-size: 22px;
+    font-weight: normal;
+    letter-spacing: -0.3px;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .page-header p {
+    font-size: 13px;
+    color: var(--text-2);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+
+  .tab {
+    padding: 6px 16px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-2);
+    background: none;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    transition: all 0.12s;
+  }
+
+  .tab.active {
+    background: var(--surface);
+    border-color: var(--border-md);
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .tab:hover:not(.active) {
+    color: var(--text);
+    background: var(--surface2);
+  }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── LEGEND ─────────────────────────────────────── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 16px;
+    font-size: 11px;
+    color: var(--text-2);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    align-items: center;
+  }
+
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .legend-note { margin-left: auto; font-size: 11px; color: var(--text-3); }
+
+  /* ── WEEKLY GRID ─────────────────────────────────── */
+  .week-grid {
+    display: grid;
+    grid-template-columns: 86px repeat(5, 1fr);
+    gap: 4px;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .day-header {
+    background: var(--surface2);
+    border-radius: 4px;
+    padding: 6px 4px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+
+  .row-label {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 8px;
+    font-size: 10px;
+    color: var(--text-3);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    text-align: right;
+  }
+
+  .day-cell {
+    min-height: 50px;
+    background: var(--surface);
+    border-radius: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .day-cell.fri { border-color: var(--amber-bd); }
+
+  .job-chip {
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    display: block;
+    transition: opacity 0.12s, outline 0.12s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-weight: 500;
+  }
+
+  .job-chip:hover { opacity: 0.7; }
+  .chip-daily   { background: var(--blue-bg);   color: var(--blue); }
+  .chip-weekly  { background: var(--purple-bg); color: var(--purple); }
+  .chip-eow     { background: var(--amber-bg);  color: var(--amber); border: 1px solid var(--amber-bd); }
+  .chip-monthly { background: var(--teal-bg);   color: var(--teal);  border: 1px solid var(--teal-bd); }
+
+  .dep-chain-label {
+    font-size: 9px;
+    color: var(--text-3);
+    margin-top: 2px;
+    padding-left: 2px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .cell-note {
+    font-size: 9px;
+    color: var(--text-3);
+    margin-bottom: 2px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .cell-sub {
+    font-size: 9px;
+    margin-top: 1px;
+    padding-left: 2px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .job-chip.highlighted {
+    outline: 2px solid #E85D24;
+    outline-offset: 1px;
+    opacity: 1 !important;
+  }
+
+  /* ── MONTHLY VIEW ────────────────────────────────── */
+  .month-timeline { overflow-x: auto; }
+  .month-inner { min-width: 700px; }
+
+  .month-row {
+    display: grid;
+    grid-template-columns: 150px repeat(31, 1fr);
+    gap: 2px;
+    margin-bottom: 2px;
+    align-items: center;
+  }
+
+  .month-row-label {
+    font-size: 11px;
+    color: var(--text-2);
+    text-align: right;
+    padding-right: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .day-num-header {
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-3);
+    padding: 2px 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .month-cell { height: 20px; border-radius: 2px; cursor: default; }
+  .month-cell.has-job { cursor: pointer; }
+  .month-cell.workday { background: var(--surface2); }
+  .month-cell.weekend { background: transparent; }
+  .month-cell.has-job.daily   { background: #B5D4F4; }
+  .month-cell.has-job.eow     { background: var(--amber-bg); border: 1px solid var(--amber-bd); }
+  .month-cell.has-job.monthly { background: #9FE1CB; border: 1px solid var(--teal-bd); }
+
+  /* ── ANNUAL GRID ─────────────────────────────────── */
+  .year-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  @media (max-width: 700px) {
+    .year-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .year-month {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 10px;
+    border: 1px solid var(--border);
+  }
+
+  .year-month-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+    margin-bottom: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-header { font-size: 9px; color: var(--text-3); text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .cal-day {
+    height: 18px; border-radius: 2px; font-size: 9px; text-align: center;
+    line-height: 18px; color: var(--text-3);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .cal-day.workday { background: transparent; color: var(--text-3); }
+  .cal-day.has-job { cursor: pointer; font-weight: 600; }
+  .cal-day.annual-job     { background: var(--amber-bg); color: var(--amber); }
+  .cal-day.quarterly-job  { background: var(--purple-bg); color: var(--purple); }
+  .cal-day.monthly-anchor { background: var(--teal-bg); color: var(--teal); }
+  .cal-day.eow-marker     { background: var(--amber-bg); color: var(--amber); border-radius: 50%; }
+  .cal-day.weekend-day    { color: var(--border-md); }
+
+  /* ── TOOLTIP ─────────────────────────────────────── */
+  .tooltip {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border-md);
+    border-radius: var(--radius-lg);
+    padding: 10px 14px;
+    font-size: 12px;
+    max-width: 340px;
+    z-index: 9999;
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.14);
+    display: none;
+    line-height: 1.55;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .tt-job  { font-weight: 600; font-size: 13px; color: var(--text); margin-bottom: 3px;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; }
+  .tt-run  { color: var(--info-text); font-size: 11px; margin-bottom: 5px; }
+  .tt-desc { color: var(--text-2); margin-bottom: 5px; font-style: italic; }
+  .tt-deps { color: var(--text-2); font-size: 11px; }
+  .tt-deps span { font-weight: 600; color: var(--text); }
+
+  /* ── INFO BOX ────────────────────────────────────── */
+  .info-box {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-2);
+    line-height: 1.65;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  .info-box strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Batch job schedule — dependency timeline</h1>
+  <p>ESP APPL CUSTOMER schedule · 1,416 jobs · daily / weekly / monthly / annual views · hover for details, click to highlight dependency chain</p>
+</div>
+
+<div class="tab-bar">
+  <button class="tab active" onclick="switchTab('weekly')">Weekly view</button>
+  <button class="tab" onclick="switchTab('monthly')">Monthly view</button>
+  <button class="tab" onclick="switchTab('annual')">Annual calendar</button>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<!-- ══════════════════════════════════════════════════
+     WEEKLY VIEW
+════════════════════════════════════════════════════ -->
+<div id="view-weekly" class="view active">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:#B5D4F4"></div>Daily (workday)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--purple-bg);border:1px solid var(--purple)"></div>Weekly (WPD)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--amber-bg);border:1px solid var(--amber-bd)"></div>Last workday of week</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#9FE1CB;border:1px solid var(--teal-bd)"></div>Monthly (EOM)</div>
+    <div class="legend-note">Click a job to highlight its dependency chain</div>
+  </div>
+
+  <div class="week-grid">
+    <div></div>
+    <div class="day-header">Mon</div>
+    <div class="day-header">Tue</div>
+    <div class="day-header">Wed</div>
+    <div class="day-header">Thu</div>
+    <div class="day-header">Fri (last WD)</div>
+
+    <!-- Entry points -->
+    <div class="row-label">Entry points</div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CNT15LNK')" data-job="CNT15LNK">CNT15LNK</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CNT03LNK')" data-job="CNT03LNK">CNT03LNK</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CNT08LNK')" data-job="CNT08LNK">CNT08LNK</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CNT12LNK')" data-job="CNT12LNK">CNT12LNK</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CNT04LNK')" data-job="CNT04LNK">CNT04LNK</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CNT09LNK')" data-job="CNT09LNK">CNT09LNK</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN599DPD')" data-job="CN599DPD">CN599DPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN182DPD')" data-job="CN182DPD">CN182DPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CNERRDPD')" data-job="CNERRDPD">CNERRDPD</div>
+    </div>
+    <div class="day-cell fri">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN398DPD')" data-job="CN398DPD">CN398DPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN653DPD')" data-job="CN653DPD">CN653DPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN594DPD')" data-job="CN594DPD">CN594DPD</div>
+    </div>
+
+    <!-- Daily chains -->
+    <div class="row-label">Daily chains</div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN001DPD')" data-job="CN001DPD">CN001DPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN016DPD')" data-job="CN016DPD">CN016DPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN011DPD')" data-job="CN011DPD">CN011DPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN050RPD')" data-job="CN050RPD">CN050RPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN051RPD')" data-job="CN051RPD">CN051RPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN052RPD')" data-job="CN052RPD">CN052RPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN053RPD')" data-job="CN053RPD">CN053RPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN054RPD')" data-job="CN054RPD">CN054RPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN055RPD')" data-job="CN055RPD">CN055RPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN056RPD')" data-job="CN056RPD">CN056RPD</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN057RPD')" data-job="CN057RPD">CN057RPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN063DPD')" data-job="CN063DPD">CN063DPD ▶</div>
+      <div class="dep-chain-label">→ CN064, 067, 068…</div>
+    </div>
+    <div class="day-cell fri">
+      <div class="job-chip chip-daily" onclick="highlightChain('CN004DPD')" data-job="CN004DPD">CN004DPD ▶</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CN005DPD')" data-job="CN005DPD">CN005DPD</div>
+      <div class="dep-chain-label">→ CN093, 012…</div>
+    </div>
+
+    <!-- AR weekly chain -->
+    <div class="row-label">AR weekly</div>
+    <div class="day-cell"><div class="cell-note">Accumulates Mon–Thu</div></div>
+    <div class="day-cell">
+      <div class="job-chip chip-weekly" onclick="highlightChain('CN743WPD')" data-job="CN743WPD">CN743WPD ①</div>
+      <div class="cell-sub" style="color:var(--purple)">AR report start</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-weekly" onclick="highlightChain('CN745WPD')" data-job="CN745WPD">CN745WPD ②</div>
+      <div class="cell-sub" style="color:var(--purple)">← CN743WPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-weekly" onclick="highlightChain('CN746WPD')" data-job="CN746WPD">CN746WPD ③</div>
+      <div class="job-chip chip-weekly" onclick="highlightChain('CN747WPD')" data-job="CN747WPD">CN747WPD ④</div>
+    </div>
+    <div class="day-cell fri">
+      <div class="job-chip chip-eow" onclick="highlightChain('CN748WPD')" data-job="CN748WPD">CN748WPD ⑤</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN756WPD')" data-job="CN756WPD">CN756WPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN75KWPD')" data-job="CN75KWPD">CN75KWPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN75LWPD')" data-job="CN75LWPD">CN75LWPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN75MWPD')" data-job="CN75MWPD">CN75MWPD</div>
+      <div class="cell-sub" style="color:var(--amber)">← CN745, 748, 750DPD</div>
+    </div>
+
+    <!-- Fuel assistance -->
+    <div class="row-label">Fuel assist.</div>
+    <div class="day-cell">
+      <div class="job-chip chip-daily" onclick="highlightChain('CAPCSS.AAELGBTY')" data-job="CAPCSS.AAELGBTY">CAPCSS.AA…</div>
+      <div class="job-chip chip-daily" onclick="highlightChain('CAPCSS.BBELGBTY')" data-job="CAPCSS.BBELGBTY">CAPCSS.BB…</div>
+      <div class="cell-note">+17 more CAPCSS</div>
+    </div>
+    <div class="day-cell"><div class="cell-note">CAPCSS jobs run each workday</div></div>
+    <div class="day-cell"><div class="cell-note">CN975MPD feeds into end-of-week</div></div>
+    <div class="day-cell"><div class="cell-note">CNT15LNK trigger</div></div>
+    <div class="day-cell fri">
+      <div class="job-chip chip-eow" onclick="highlightChain('CN833WPD')" data-job="CN833WPD">CN833WPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN881WPD')" data-job="CN881WPD">CN881WPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN883WPD')" data-job="CN883WPD">CN883WPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN884WPD')" data-job="CN884WPD">CN884WPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN918WPD')" data-job="CN918WPD">CN918WPD</div>
+      <div class="job-chip chip-eow" onclick="highlightChain('CN882WPD')" data-job="CN882WPD">CN882WPD</div>
+      <div class="cell-sub" style="color:var(--amber)">← 19 CAPCSS + CN975MPD</div>
+    </div>
+
+    <!-- Monthly EOM -->
+    <div class="row-label">Monthly (EOM)</div>
+    <div class="day-cell">
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN105MPD')" data-job="CN105MPD">CN105MPD</div>
+      <div class="cell-sub" style="color:var(--teal)">← CN105DPD (daily)</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN527MPD')" data-job="CN527MPD">CN527MPD</div>
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN528MPD')" data-job="CN528MPD">CN528MPD</div>
+      <div class="cell-sub" style="color:var(--teal)">← CN527DPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN647MPD')" data-job="CN647MPD">CN647MPD</div>
+      <div class="cell-sub" style="color:var(--teal)">← CN647DPD</div>
+    </div>
+    <div class="day-cell">
+      <div class="job-chip chip-monthly" onclick="highlightChain('CNERRMPD')" data-job="CNERRMPD">CNERRMPD</div>
+      <div class="cell-sub" style="color:var(--teal)">← CNERRDPD (daily)</div>
+    </div>
+    <div class="day-cell fri">
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN969MPD')" data-job="CN969MPD">CN969MPD</div>
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN970MPD')" data-job="CN970MPD">CN970MPD</div>
+      <div class="job-chip chip-monthly" onclick="highlightChain('CN871MPD')" data-job="CN871MPD">CN871MPD</div>
+      <div class="cell-sub" style="color:var(--teal)">← CNT15LNK</div>
+    </div>
+  </div>
+
+  <div class="info-box">
+    <strong>Reading the grid:</strong> Daily jobs run Mon–Fri. Weekly (WPD) jobs accumulate through the week before firing on the last workday. Monthly (MPD) end-of-month jobs depend on their daily counterpart completing. The Friday column shows 30+ end-of-week jobs all waiting on daily predecessors.
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     MONTHLY VIEW
+════════════════════════════════════════════════════ -->
+<div id="view-monthly" class="view">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:#B5D4F4"></div>Daily (workdays)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--amber-bg);border:1px solid var(--amber-bd)"></div>End-of-week gate</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#9FE1CB;border:1px solid var(--teal-bd)"></div>Monthly milestone</div>
+  </div>
+  <div class="month-timeline"><div class="month-inner" id="month-inner"></div></div>
+  <div class="info-box">
+    <strong>Key monthly milestones:</strong> Day 1 (BILGRP_DAY1) → billing group start. Days 5, 10, 14–16, 18, 20 = staggered billing group runs. Day 20 = MTRREAD_DAY20 — meter reading lock, triggers CN845MPD, CN897MPD, CN255MPD and others. Last workday = end-of-month MPD jobs fire after their daily counterparts. 2nd Sat = CN206MPD.
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     ANNUAL VIEW
+════════════════════════════════════════════════════ -->
+<div id="view-annual" class="view">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--amber-bg);border:1px solid var(--amber-bd)"></div>Annual / one-time job</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--purple-bg);border:1px solid var(--purple)"></div>Quarterly job (runs 4×/yr)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--teal-bg);border:1px solid var(--teal-bd)"></div>Monthly milestone (every month)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--amber-bg);border-radius:50%"></div>End-of-week gate (Fridays)</div>
+  </div>
+  <div class="year-grid" id="year-grid"></div>
+  <div class="info-box">
+    <strong>Annual-only jobs:</strong>
+    Jan: CN068YPD (first WD), CN748RPD (3rd Sun), CN949YPD (2nd Sat), CN12ADPD (1st WD). Mar: CN368YPD (1st WD). Apr: CN208YPD (1st WD), AHC174PD + CN872/3APD (workdays from Apr 23). May: DRC9746A (1st). Jul: CN701YPD (Jul 1 + 1 WD), CN74972A (last day). Nov: CN147YPD (1st day), CN65ADPD.
+    Quarterly: CN121QPD + CN124QPD run Jan/Apr/Jul/Oct. CN981QPD: last WD of Mar/Jun/Sep/Dec. Sep–Nov: CN12DDPD runs workdays in those 3 months only.
+  </div>
+</div>
+
+<script>
+const jobData = {
+  'CNT15LNK':         { run:'Workdays', desc:'Link/trigger — releases CN001DPD, CN016DPD, CN833WPD, CN883WPD, CN881WPD, CN884WPD, CN969MPD', prereqs:[] },
+  'CNT03LNK':         { run:'Workdays', desc:'Link trigger — releases CN011DPD, CN030DPD', prereqs:[] },
+  'CNT08LNK':         { run:'Workdays', desc:'Link trigger — releases CN050–CN057 RPD (daily cash posting partitions)', prereqs:[] },
+  'CNT12LNK':         { run:'Workdays', desc:'Link trigger — releases CN006MPD, CN007MPD, CN015MPD, CN052MPD, CN099MPD', prereqs:[] },
+  'CNT04LNK':         { run:'Workdays', desc:'Extracts accounts with EJP rates; heating accounts normalised, non-heating accounts updated with day count only. Releases CN079DPD.', prereqs:[] },
+  'CNT09LNK':         { run:'Workdays', desc:'Link trigger — releases CN001QPD, CN091DPD', prereqs:[] },
+  'CN599DPD':         { run:'Workdays', desc:'Executes CUBCT027 and CUBGM005; puts all tables back in read/write mode. Releases CN008, 014, 020, 032, 034, 036, 044, 092, 093MPD, CN918WPD.', prereqs:[] },
+  'CN182DPD':         { run:'Workdays', desc:'Process EDI 820 payment remittance outbound transactions. Releases CN039, 066, 069, 074, 075DPD.', prereqs:[] },
+  'CNERRDPD':         { run:'Workdays', desc:'Daily error/correction job — releases CNERRMPD and the CN845MPD meter-reading chain.', prereqs:[] },
+  'CN398DPD':         { run:'Workdays', desc:'Runs prior to daily batch billing. Compares control card date and date constants table to determine processing date; unloads and sorts tables to verify the date constants batch ran.', prereqs:[] },
+  'CN653DPD':         { run:'Workdays', desc:'Allocates and copies datasets in CPUA — EDI archive (workdays). Releases CN066DPD, CN069DPD, CN074DPD, CN075DPD.', prereqs:[] },
+  'CN594DPD':         { run:'Workdays', desc:'Unloads the CU10TB14_FNC_AUDIT table. Releases CN013DPD and CN882WPD (end-of-week AR report).', prereqs:[] },
+  'CN001DPD':         { run:'Workdays', desc:'Top 10 report — highest 10 bill accounts by segment (residential, commercial, industrial, other) and bills over $10,000 per segment.', prereqs:['CNT15LNK'] },
+  'CN016DPD':         { run:'Workdays', desc:'Creates new customer rate and SIC report.', prereqs:['CNT15LNK'] },
+  'CN011DPD':         { run:'Workdays', desc:'Insert replevin contacts.', prereqs:['CNT03LNK'] },
+  'CN050RPD':         { run:'Workdays', desc:'Reads cash tables and calls credit source posting to determine how each payment should be posted. Remit 10:00 am — partition 1 of 8.', prereqs:['CNT08LNK'] },
+  'CN051RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 2 of 8.', prereqs:['CNT08LNK'] },
+  'CN052RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 3 of 8.', prereqs:['CNT08LNK'] },
+  'CN053RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 4 of 8.', prereqs:['CNT08LNK'] },
+  'CN054RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 5 of 8.', prereqs:['CNT08LNK'] },
+  'CN055RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 6 of 8.', prereqs:['CNT08LNK'] },
+  'CN056RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 7 of 8.', prereqs:['CNT08LNK'] },
+  'CN057RPD':         { run:'Workdays', desc:'Cash posting — remit 10:00 am, partition 8 of 8.', prereqs:['CNT08LNK'] },
+  'CN063DPD':         { run:'Workdays', desc:'Reads cash tables and calls credit source posting to determine how each payment should be posted. Aggregates all 8 RPD partitions; releases CN064, CN067, CN068, CN071DPD chain.', prereqs:['CN050RPD','CN051RPD','CN052RPD','CN053RPD','CN054RPD','CN055RPD','CN056RPD','CN057RPD'] },
+  'CN004DPD':         { run:'Daily', desc:'Batch enrollment — ITT 124523, MCR_4635 SS MA EDI 814 drop and MCR 4638 SS MA EDI 814 response. Receives all RPD jobs and CN007DPD.', prereqs:['CN050RPD','CN051RPD','CN052RPD','CN053RPD','CN054RPD','CN055RPD','CN056RPD','CN057RPD','CN007DPD'] },
+  'CN005DPD':         { run:'Daily', desc:'Calculate gas contract values for gas transportation.', prereqs:['CN093DPD','CN266DPD'] },
+  'CN743WPD':         { run:'Last workday of week', desc:'Accounts receivable report — step 1 (no prerequisites, calendar-driven).', prereqs:[] },
+  'CN745WPD':         { run:'Last workday of week', desc:'Split deferred budget billing by company — step 2 of AR chain.', prereqs:['CN743WPD'] },
+  'CN746WPD':         { run:'Last workday of week', desc:'Accounts receivable report for Nantucket — step 3.', prereqs:['CN745WPD'] },
+  'CN747WPD':         { run:'Last workday of week', desc:'Accounts receivable report for Massachusetts Electric — step 4.', prereqs:['CN746WPD'] },
+  'CN748WPD':         { run:'Last workday of week', desc:'Accounts receivable report for Niagara Mohawk — step 5 (final in sequential chain).', prereqs:['CN747WPD'] },
+  'CN756WPD':         { run:'Last workday of week', desc:'Downstream of CN748WPD + CN750DPD (daily).', prereqs:['CN748WPD','CN750DPD'] },
+  'CN75KWPD':         { run:'Last workday of week', desc:'Downstream of CN745WPD + CN748WPD + CN750DPD.', prereqs:['CN745WPD','CN748WPD','CN750DPD'] },
+  'CN75LWPD':         { run:'Last workday of week', desc:'Downstream of CN745WPD + CN748WPD + CN750DPD.', prereqs:['CN745WPD','CN748WPD','CN750DPD'] },
+  'CN75MWPD':         { run:'Last workday of week', desc:'Downstream of CN745WPD + CN748WPD + CN750DPD.', prereqs:['CN745WPD','CN748WPD','CN750DPD'] },
+  'CAPCSS.AAELGBTY':  { run:'Last workday of week', desc:'Eligibility check (AA segment) — feeds CN833WPD at week-end.', prereqs:[] },
+  'CAPCSS.BBELGBTY':  { run:'Last workday of week', desc:'Eligibility check (BB segment) — feeds CN833WPD at week-end.', prereqs:[] },
+  'CN833WPD':         { run:'Last workday of week', desc:'Processes file sent from state of Rhode Island. Validates that RI customers should be receiving fuel assistance. Requires all 19 CAPCSS.* eligibility jobs + CN975MPD + CNT15LNK.', prereqs:['CAPCSS.AAELGBTY','CAPCSS.BBELGBTY','CN975MPD','CNT15LNK'] },
+  'CN881WPD':         { run:'Last workday of week', desc:'Weekly fuel assistance customer report.', prereqs:['CN833WPD','CNT15LNK'] },
+  'CN883WPD':         { run:'Last workday of week', desc:'Processes gas file sent from state of Boston and Colonial. Validates that customers should be receiving fuel assistance.', prereqs:['CNT15LNK'] },
+  'CN884WPD':         { run:'Last workday of week', desc:'Weekly fuel assistance customer report.', prereqs:['CN883WPD','CNT15LNK'] },
+  'CN918WPD':         { run:'Last workday of week', desc:'New customer list for municipal aggregation.', prereqs:['CN599DPD','CNT04LNK'] },
+  'CN882WPD':         { run:'Last workday of week', desc:'Produces the accounts receivable report. Depends on CN594DPD (daily).', prereqs:['CN594DPD'] },
+  'CN105MPD':         { run:'Last workday of month', desc:'Backs up the finance team DATARPR file on a monthly basis. Depends on CN105DPD (daily).', prereqs:['CN105DPD'] },
+  'CN527MPD':         { run:'Last workday of month', desc:'Monthly missed service appointments report for the state of Massachusetts. Depends on CN527DPD.', prereqs:['CN527DPD'] },
+  'CN528MPD':         { run:'Last workday of month', desc:'Consolidated service quality appointment statistics for the state of Massachusetts. Depends on CN527DPD.', prereqs:['CN527DPD'] },
+  'CN647MPD':         { run:'Last workday of month', desc:'Monthly downstream job. Depends on CN647DPD (daily).', prereqs:['CN647DPD'] },
+  'CNERRMPD':         { run:'Last workday of month', desc:'Monthly error report. Depends on CNERRDPD (daily).', prereqs:['CNERRDPD'] },
+  'CN969MPD':         { run:'Last workday of month', desc:'Produces monthly reports for premium service product details and summary. Triggered by CNT15LNK.', prereqs:['CNT15LNK'] },
+  'CN970MPD':         { run:'Last workday of month', desc:'Downstream of CN969MPD.', prereqs:['CN969MPD'] },
+  'CN871MPD':         { run:'Last workday of month', desc:'Downstream of CN969MPD.', prereqs:['CN969MPD'] },
+  'CN947MPD':         { run:'Last workday of month', desc:'Monthly job. Depends on CN947DPD (daily).', prereqs:['CN947DPD'] },
+  'CN068YPD':         { run:'First workday of Jan', desc:'10-day warning tag follow-up letter report.', prereqs:[] },
+  'CN748RPD':         { run:'3rd Sunday of January', desc:'Cash posting.', prereqs:[] },
+  'CN949YPD':         { run:'2nd Saturday of Jan', desc:'Home energy efficiency.', prereqs:[] },
+  'CN12ADPD':         { run:'Workdays starting 1 Jan 2021', desc:'Safety line inspection.', prereqs:[] },
+  'CN368YPD':         { run:'1st workday of March', desc:'Generates CRAF (Change Request Authorization Form) reports for traffic signal components.', prereqs:[] },
+  'CN208YPD':         { run:'First workday of Apr', desc:'Performance metrics data extract.', prereqs:[] },
+  'AHC174PD':         { run:'Workdays starting 23 Apr 2021', desc:'Annual April-start job. Released by CNERRPD.', prereqs:['CNERRPD'] },
+  'CN872APD':         { run:'Workdays starting 23 Apr 2021', desc:'Annual April-start job.', prereqs:[] },
+  'CN873APD':         { run:'Workdays starting 23 Apr 2021', desc:'Annual April-start job.', prereqs:[] },
+  'CN701YPD':         { run:'1 Jul + 1 workday', desc:'Escheatment.', prereqs:[] },
+  'CN74972A':         { run:'Last day of July', desc:'Annual end-of-July job.', prereqs:[] },
+  'CN09BDPD':         { run:'Daily starting 23 Jul 2025', desc:"Creates a daily BTU zone file that is FTP'd to GTIS 2.0.", prereqs:['CN097DPD'] },
+  'CN121QPD':         { run:'16th day of Jan / Apr / Jul / Oct', desc:'Quarterly process to produce a summary report by meter-reader-ID. Depends on CN121MPD (monthly).', prereqs:['CN121MPD'] },
+  'CN124QPD':         { run:'1st Sunday of Jan / Apr / Jul / Oct', desc:'Produces quarterly meter reading reports for emergency preparedness.', prereqs:[] },
+  'CN981QPD':         { run:'Last workday of Mar / Jun / Sep / Dec', desc:'Medical equipment reports.', prereqs:[] },
+  'CN147YPD':         { run:'First day of Nov', desc:'Creates dormant review reports for NMPC and KDLI.', prereqs:[] },
+  'CN65ADPD':         { run:'Workdays starting 17 Nov 2023', desc:'Annual November-start workday job.', prereqs:[] },
+  'CN12DDPD':         { run:'Workdays in Sep / Oct / Nov only', desc:'Runs on workdays during September, October, and November only.', prereqs:[] },
+  'DRC9746A':         { run:'First day of May', desc:'Annual May 1 job — updates CU02TB01, CU02TB34, CU02TB38.', prereqs:[] },
+  'CN121MPD':         { run:'16th day of month', desc:'Summary report by meter-reader-ID within CD-OPER-CNTR. Releases CN121QPD on quarterly months (Jan/Apr/Jul/Oct).', prereqs:[] },
+};
+
+const tt = document.getElementById('tooltip');
+
+function moveTT(e) {
+  let x = e.clientX + 14, y = e.clientY - 10;
+  if (x + 350 > window.innerWidth) x = e.clientX - 364;
+  if (y + 180 > window.innerHeight) y = e.clientY - 190;
+  tt.style.left = x + 'px'; tt.style.top = y + 'px';
+}
+
+function showTT(e, jobId) {
+  const d = jobData[jobId];
+  if (!d) return;
+  const prereqStr = d.prereqs.length ? d.prereqs.join(', ') : 'None (calendar-triggered)';
+  tt.innerHTML = `<div class="tt-job">${jobId}</div><div class="tt-run">${d.run}</div>${d.desc ? `<div class="tt-desc">${d.desc}</div>` : ''}<div class="tt-deps">Prerequisites: <span>${prereqStr}</span></div>`;
+  tt.style.display = 'block';
+  moveTT(e);
+}
+
+function hideTT() { tt.style.display = 'none'; }
+
+function showCalTT(e, label, jobs) {
+  tt.innerHTML = `<div class="tt-job">${label}</div><div class="tt-desc">${jobs}</div>`;
+  tt.style.display = 'block';
+  moveTT(e);
+}
+
+document.querySelectorAll('.job-chip').forEach(chip => {
+  const job = chip.dataset.job || chip.textContent.trim().split(' ')[0];
+  chip.addEventListener('mouseenter', e => showTT(e, job));
+  chip.addEventListener('mousemove', moveTT);
+  chip.addEventListener('mouseleave', hideTT);
+});
+
+let activeChain = null;
+function highlightChain(jobId) {
+  document.querySelectorAll('.job-chip').forEach(c => c.classList.remove('highlighted'));
+  if (activeChain === jobId) { activeChain = null; return; }
+  activeChain = jobId;
+  const chain = new Set([jobId]);
+  const d = jobData[jobId];
+  if (d) d.prereqs.forEach(p => chain.add(p));
+  Object.entries(jobData).forEach(([j, info]) => { if (info.prereqs.includes(jobId)) chain.add(j); });
+  document.querySelectorAll('.job-chip').forEach(c => {
+    const cj = (c.dataset.job || c.textContent.trim().split(' ')[0]).replace(/[①②③④⑤▶]/g,'').trim();
+    if (chain.has(cj)) c.classList.add('highlighted');
+  });
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById('view-' + name).classList.add('active');
+}
+
+function buildMonthly() {
+  const container = document.getElementById('month-inner');
+  const days = Array.from({length:31},(_,i)=>i+1);
+  const weekends = new Set([6,7,13,14,20,21,27,28]);
+  const workdays = days.filter(d => !weekends.has(d));
+  const lastWD = Math.max(...workdays);
+  const fridays = [5,12,19,26].filter(d => !weekends.has(d) && d<=31);
+
+  const headerRow = document.createElement('div');
+  headerRow.className = 'month-row';
+  const el = document.createElement('div'); el.className = 'month-row-label';
+  headerRow.appendChild(el);
+  days.forEach(d => {
+    const c = document.createElement('div'); c.className = 'day-num-header'; c.textContent = d;
+    headerRow.appendChild(c);
+  });
+  container.appendChild(headerRow);
+
+  const rowDefs = [
+    { label:'Daily (workdays)',             test: d => !weekends.has(d), cls:'daily',   tip: d => 'Workday — all WORKDAYS-scheduled jobs run' },
+    { label:'End-of-week gate (Fridays)',   test: d => fridays.includes(d), cls:'eow',  tip: d => 'Friday: WPD chain (CN743→748WPD), CAPCSS→CN833WPD fuel assistance, CN882/918WPD and others' },
+    { label:'Billing groups (BILGRP_DAY*)', test: d => [1,2,3,5,10,14,15,16,18,20].includes(d), cls:'monthly', tip: d => `BILGRP_DAY${d}: staggered billing group run` },
+    { label:'Meter read (MTRREAD_DAY*)',    test: d => [1,10,14,20].includes(d), cls:'monthly', tip: d => `MTRREAD_DAY${d}: meter reading milestone` },
+    { label:'16th — CN121MPD',             test: d => d===16, cls:'monthly', tip: d => 'CN121MPD: Summary report by meter-reader-ID. On Jan/Apr/Jul/Oct also triggers CN121QPD (quarterly).' },
+    { label:'2nd Saturday — CN206MPD',     test: d => d===14, cls:'monthly', tip: d => 'CN206MPD (~2nd Sat): Copies monthly arrears data to flat file for SASAL01P server / CIAP database.' },
+    { label:'Last workday — EOM jobs',     test: d => d===lastWD, cls:'monthly', tip: d => 'Last workday of month: CN105MPD, CN969/970/871MPD, CNERRMPD, CN527/528MPD, CN647MPD, CN947MPD — all gated on their daily predecessors.' },
+  ];
+
+  rowDefs.forEach(rowDef => {
+    const row = document.createElement('div'); row.className = 'month-row';
+    const lbl = document.createElement('div'); lbl.className = 'month-row-label'; lbl.textContent = rowDef.label;
+    row.appendChild(lbl);
+    days.forEach(d => {
+      const cell = document.createElement('div');
+      cell.className = 'month-cell ' + (weekends.has(d) ? 'weekend' : 'workday');
+      if (rowDef.test(d)) {
+        cell.classList.add('has-job', rowDef.cls);
+        const tip = rowDef.tip(d);
+        cell.addEventListener('mouseenter', e => showCalTT(e, `Day ${d}`, tip));
+        cell.addEventListener('mousemove', moveTT);
+        cell.addEventListener('mouseleave', hideTT);
+      }
+      row.appendChild(cell);
+    });
+    container.appendChild(row);
+  });
+}
+
+function buildAnnual() {
+  const grid = document.getElementById('year-grid');
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dayNames = ['S','M','T','W','T','F','S'];
+
+  const annualJobs = {
+    1:  [
+      { day:1,  type:'annual',    label:'CN12ADPD (1st WD) — Safety line inspection' },
+      { day:1,  type:'annual',    label:'CN068YPD (1st WD) — 10-day warning tag follow-up letter report' },
+      { day:9,  type:'annual',    label:'CN949YPD (2nd Sat) — Home energy efficiency' },
+      { day:18, type:'annual',    label:'CN748RPD (3rd Sun) — Cash posting' },
+      { day:16, type:'quarterly', label:'CN121QPD (16th) — Quarterly meter-reader-ID summary report' },
+      { day:4,  type:'quarterly', label:'CN124QPD (1st Sun) — Quarterly emergency preparedness meter reading reports' },
+    ],
+    2:  [{ day:15, type:'annual', label:'CN37ADPD, CN031DPD, CN144DPD, CN145DPD — workday-start jobs (from 15 Feb 2021)' }],
+    3:  [
+      { day:2,  type:'annual',    label:'CN368YPD (1st WD) — CRAF reports for traffic signal components' },
+      { day:31, type:'quarterly', label:'CN981QPD (last WD) — Medical equipment reports' },
+    ],
+    4:  [
+      { day:1,  type:'annual',    label:'CN208YPD (1st WD) — Performance metrics data extract' },
+      { day:16, type:'quarterly', label:'CN121QPD (16th) — Quarterly meter-reader-ID summary report' },
+      { day:5,  type:'quarterly', label:'CN124QPD (1st Sun) — Quarterly emergency preparedness meter reading reports' },
+      { day:23, type:'annual',    label:'AHC174PD, CN872APD, CN873APD — annual April-start workday jobs' },
+    ],
+    5:  [{ day:1, type:'annual', label:'DRC9746A (1st day) — Updates CU02TB01, CU02TB34, CU02TB38' }],
+    6:  [
+      { day:25, type:'annual',    label:'CNA6296A (25 Jun)' },
+      { day:30, type:'quarterly', label:'CN981QPD (last WD) — Medical equipment reports' },
+    ],
+    7:  [
+      { day:2,  type:'annual',    label:'CN701YPD (1 Jul + 1 WD) — Escheatment' },
+      { day:16, type:'quarterly', label:'CN121QPD (16th) — Quarterly meter-reader-ID summary report' },
+      { day:5,  type:'quarterly', label:'CN124QPD (1st Sun) — Quarterly emergency preparedness meter reading reports' },
+      { day:31, type:'annual',    label:'CN74972A (last day of July)' },
+    ],
+    9:  [
+      { day:1,  type:'annual',    label:'CN12DDPD — workday job active Sep, Oct, Nov only' },
+      { day:30, type:'quarterly', label:'CN981QPD (last WD) — Medical equipment reports' },
+    ],
+    10: [
+      { day:1,  type:'annual',    label:'CN394DPD (from Oct 2020) — LSRV event data from AutoGrid processed to CU13TB16' },
+      { day:16, type:'quarterly', label:'CN121QPD (16th) — Quarterly meter-reader-ID summary report' },
+      { day:4,  type:'quarterly', label:'CN124QPD (1st Sun) — Quarterly emergency preparedness meter reading reports' },
+      { day:28, type:'annual',    label:'CN1106FC (28 Oct)' },
+    ],
+    11: [
+      { day:1,  type:'annual', label:'CN147YPD (1st day) — Dormant review reports for NMPC and KDLI' },
+      { day:17, type:'annual', label:'CN65ADPD (from 17 Nov 2023) — annual Nov-start workday job' },
+    ],
+    12: [
+      { day:15, type:'annual',    label:'CN442DPD, CN443DPD, CN444DPD — workday jobs from 15 Dec 2023' },
+      { day:31, type:'quarterly', label:'CN981QPD (last WD) — Medical equipment reports' },
+    ],
+  };
+
+  const monthlyRecurring = [
+    { day:1,  type:'monthly-anchor', label:'BILGRP_DAY1 + 1st day of month milestone' },
+    { day:16, type:'monthly-anchor', label:'CN121MPD (16th) — summary report by meter-reader-ID; triggers CN121QPD on quarterly months' },
+    { day:20, type:'monthly-anchor', label:'MTRREAD_DAY20 — meter reading lock; triggers CN845MPD, CN897MPD, CN255MPD and downstream jobs' },
+  ];
+
+  monthNames.forEach((mName, mi) => {
+    const monthNum = mi + 1;
+    const div = document.createElement('div'); div.className = 'year-month';
+    const title = document.createElement('div'); title.className = 'year-month-name'; title.textContent = mName;
+    div.appendChild(title);
+    const calGrid = document.createElement('div'); calGrid.className = 'cal-grid';
+    dayNames.forEach(d => { const h = document.createElement('div'); h.className = 'cal-header'; h.textContent = d; calGrid.appendChild(h); });
+
+    const firstDay = new Date(2026, mi, 1).getDay();
+    const daysInMonth = new Date(2026, mi+1, 0).getDate();
+    for (let i = 0; i < firstDay; i++) calGrid.appendChild(document.createElement('div'));
+
+    const jobsThisMonth = {};
+    (annualJobs[monthNum]||[]).forEach(j => { (jobsThisMonth[j.day]=jobsThisMonth[j.day]||[]).push(j); });
+    monthlyRecurring.forEach(j => { (jobsThisMonth[j.day]=jobsThisMonth[j.day]||[]).push(j); });
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dow = new Date(2026, mi, d).getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const cell = document.createElement('div'); cell.className = 'cal-day'; cell.textContent = d;
+
+      if (isWeekend) {
+        cell.classList.add('weekend-day');
+      } else {
+        cell.classList.add('workday');
+        if (dow === 5) {
+          cell.classList.add('eow-marker');
+          cell.addEventListener('mouseenter', e => showCalTT(e, `${mName} ${d} (Friday)`, 'End-of-week gate — WPD chain (CN743→748WPD), CAPCSS→CN833WPD fuel assistance, CN882/918WPD and others'));
+          cell.addEventListener('mousemove', moveTT);
+          cell.addEventListener('mouseleave', hideTT);
+        }
+      }
+
+      if (jobsThisMonth[d]) {
+        const jobs = jobsThisMonth[d];
+        const types = jobs.map(j=>j.type);
+        const cls = types.includes('annual') ? 'annual-job' : types.includes('quarterly') ? 'quarterly-job' : 'monthly-anchor';
+        if (!cell.classList.contains('eow-marker')) cell.classList.add('has-job', cls);
+        const labels = jobs.map(j=>j.label).join('\n');
+        cell.addEventListener('mouseenter', e => showCalTT(e, `${mName} ${d}`, labels));
+        cell.addEventListener('mousemove', moveTT);
+        cell.addEventListener('mouseleave', hideTT);
+        cell.style.cursor = 'pointer';
+      }
+      calGrid.appendChild(cell);
+    }
+    div.appendChild(calGrid);
+    grid.appendChild(div);
+  });
+}
+
+buildMonthly();
+buildAnnual();
+</script>
+</body>
+</html>
